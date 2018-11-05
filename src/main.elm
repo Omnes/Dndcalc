@@ -1,10 +1,26 @@
 module Main exposing (Model, Msg(..), init, main, update, view)
 
+--
+--
+
+import Axis
 import Browser
+import Chart
+import Color exposing (Color)
 import Dict exposing (Dict)
-import Html exposing (Attribute, Html, br, div, input, text, span)
+import Html exposing (Attribute, Html, br, div, input, span, text)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onInput)
+import Path exposing (Path)
+import Scale exposing (ContinuousScale)
+import Scale.Color
+import Shape
+import SubPath exposing (SubPath)
+import TypedSvg exposing (g, line, rect, svg, text_)
+import TypedSvg.Attributes as Explicit exposing (fill, fontFamily, stroke, transform, viewBox)
+import TypedSvg.Attributes.InPx exposing (height, strokeWidth, width, x, x1, x2, y, y1, y2)
+import TypedSvg.Core exposing (Svg, text)
+import TypedSvg.Types exposing (Fill(..), Transform(..), percent)
 
 
 
@@ -22,10 +38,12 @@ main =
 type alias Dice =
     Int
 
+
 type alias Weapon =
-    { dice : Dict Dice Int 
+    { dice : Dict Dice Int
     , bonus : Int
     }
+
 
 type alias Model =
     { enemyAC : Int
@@ -37,19 +55,22 @@ type alias Model =
     , attacksPerTurn : Int
     }
 
-type alias HitChance = 
+
+type alias HitChance =
     { normal : Float
     , advantage : Float
     , disadvantage : Float
     }
 
-type alias Damage = 
+
+type alias Damage =
     { normal : Float
     , advantage : Float
     , disadvantage : Float
     }
 
-type alias CalculatedStats = 
+
+type alias CalculatedStats =
     { hitChance : HitChance
     , averageDamage : Damage
     , averageDamagePerTurn : Damage
@@ -104,11 +125,11 @@ renderInputs model =
 renderStatistics calculatedHitChance =
     div []
         [ text "Hit chance: "
-        , span [style "color" "red"] [ text (calculatedHitChance.disadvantage |> decimalToPercentString)]
+        , span [ style "color" "red" ] [ text (calculatedHitChance.disadvantage |> decimalToPercentString) ]
         , text " "
-        , span [style "color" "black"] [ text (calculatedHitChance.normal |> decimalToPercentString)]
+        , span [ style "color" "black" ] [ text (calculatedHitChance.normal |> decimalToPercentString) ]
         , text " "
-        , span [style "color" "green"] [ text (calculatedHitChance.advantage |> decimalToPercentString)]
+        , span [ style "color" "green" ] [ text (calculatedHitChance.advantage |> decimalToPercentString) ]
         ]
 
 
@@ -121,7 +142,7 @@ renderDamage model calculatedHitChance =
         averageHitDamage =
             calculateAverageDamage model.weapon model.strengthModifier
 
-        averageDamageWithAttack = 
+        averageDamageWithAttack =
             { normal = averageHitDamage * calculatedHitChance.normal
             , advantage = averageHitDamage * calculatedHitChance.advantage
             , disadvantage = averageHitDamage * calculatedHitChance.disadvantage
@@ -137,38 +158,52 @@ renderDamage model calculatedHitChance =
                 ]
             , Html.tr []
                 [ text "Average damage with attack: "
-                , span [style "color" "red"] [ text (averageDamageWithAttack.disadvantage |> floatToString)]
+                , span [ style "color" "red" ] [ text (averageDamageWithAttack.disadvantage |> floatToString) ]
                 , text " : "
-                , span [style "color" "black"] [ text (averageDamageWithAttack.normal |> floatToString)]
+                , span [ style "color" "black" ] [ text (averageDamageWithAttack.normal |> floatToString) ]
                 , text " : "
-                , span [style "color" "green"] [ text (averageDamageWithAttack.advantage |> floatToString)]
+                , span [ style "color" "green" ] [ text (averageDamageWithAttack.advantage |> floatToString) ]
                 ]
             , Html.tr []
                 [ text "Average damage per turn: "
-                , span [style "color" "red"] [ text (averageDamageWithAttack.disadvantage |> (*) (toFloat model.attacksPerTurn) |> floatToString)]
+                , span [ style "color" "red" ] [ text (averageDamageWithAttack.disadvantage |> (*) (toFloat model.attacksPerTurn) |> floatToString) ]
                 , text " : "
-                , span [style "color" "black"] [ text (averageDamageWithAttack.normal |> (*) (toFloat model.attacksPerTurn) |> floatToString)]
+                , span [ style "color" "black" ] [ text (averageDamageWithAttack.normal |> (*) (toFloat model.attacksPerTurn) |> floatToString) ]
                 , text " : "
-                , span [style "color" "green"] [ text (averageDamageWithAttack.advantage |> (*) (toFloat model.attacksPerTurn) |> floatToString)]
+                , span [ style "color" "green" ] [ text (averageDamageWithAttack.advantage |> (*) (toFloat model.attacksPerTurn) |> floatToString) ]
                 ]
             ]
         ]
 
 
+chartDatapoints : Int -> List Chart.Graph
+chartDatapoints characterDc =
+    [ { dataPoints = List.range 1 20 |> List.map (\n -> ( toFloat n, calculateHitChance n characterDc ))
+      , color = Color.black
+      }
+    , { dataPoints = List.range 1 20 |> List.map (\n -> ( toFloat n, calculateHitChanceWithAdvantage2 n characterDc ))
+      , color = Color.green
+      }
+    , { dataPoints = List.range 1 20 |> List.map (\n -> ( toFloat n, calculateHitChanceWithDisadvantage2 n characterDc ))
+      , color = Color.red
+      }
+    ]
+
+
 view : Model -> Html Msg
 view model =
     let
-        hitChance = 
+        hitChance =
             { normal = calculateHitChance model.enemyAC model.characterDC
             , advantage = calculateHitChanceWithAdvantage2 model.enemyAC model.characterDC
             , disadvantage = calculateHitChanceWithDisadvantage2 model.enemyAC model.characterDC
             }
     in
-
     div []
         [ renderInputs model
         , renderStatistics hitChance
         , renderDamage model hitChance
+        , Chart.renderChart (chartDatapoints model.characterDC)
         ]
 
 
@@ -241,3 +276,7 @@ floatToString input =
 weaponDamageToString : Weapon -> String
 weaponDamageToString weapon =
     weapon.dice |> Dict.foldr (\dice amount value -> value ++ String.fromInt amount ++ "d" ++ String.fromInt dice) ""
+
+
+
+-- Charts
